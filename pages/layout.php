@@ -41,7 +41,8 @@ function enTete($base, $titre, $actif, $opts = []) { ?>
     <link rel="preconnect" href="https://image.tmdb.org">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="<?= $base ?>css/app.css">
+    <!-- ?v= change à chaque modification du CSS : Cloudflare et le navigateur ne servent jamais une vieille version -->
+    <link rel="stylesheet" href="<?= $base ?>css/app.css?v=<?= filemtime(__DIR__ . '/../css/app.css') ?>">
     <script>
         // localStorage peut être indisponible (navigation privée...) : on ne plante jamais dessus
         const store = {
