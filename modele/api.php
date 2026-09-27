@@ -1,5 +1,5 @@
 <?php
-// modele/api.php - Base commune des actions JSON : POST {"tmdb_id": 123}
+// modele/api.php - Base commune des actions JSON : POST {"tmdb_id": 123, "type": "movie" | "tv", ...}
 header('Content-Type: application/json');
 require_once __DIR__ . '/connexionBd.php';
 
@@ -11,24 +11,27 @@ function repondre($ok, $message = '', $code = 200) {
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') repondre(false, 'Méthode non autorisée', 405);
 
-$tmdbId = (int)(json_decode(file_get_contents('php://input'), true)['tmdb_id'] ?? 0);
+$body = json_decode(file_get_contents('php://input'), true) ?: [];
+$tmdbId = (int)($body['tmdb_id'] ?? 0);
 if ($tmdbId <= 0) repondre(false, 'ID invalide', 400);
+$type = ($body['type'] ?? '') === 'tv' ? 'tv' : 'movie';
 
-// Colonnes copiées quand un film change de table (tout sauf id, vu, date_ajout)
-const COLONNES_FILM = 'saga_id, tmdb_id, titre, titre_original, genres, duree, note_tmdb, synopsis, tagline, date_sortie, poster_path, backdrop_path, chemin_fichier';
+// Colonnes copiées quand un titre change de table (tout sauf id, vu, date_ajout,
+// et saison : marquer vu ou remettre à voir remet la série à « pas commencée »)
+const COLONNES_FILM = 'type, saga_id, tmdb_id, titre, titre_original, genres, duree, saisons, note_tmdb, synopsis, tagline, date_sortie, poster_path, backdrop_path, chemin_fichier';
 
-// Déplace un film d'une table à l'autre dans une transaction
-function deplacerFilm($pdo, $tmdbId, $depuis, $vers, $vu) {
+// Déplace un titre d'une table à l'autre dans une transaction
+function deplacerFilm($pdo, $tmdbId, $type, $depuis, $vers, $vu) {
     try {
         $pdo->beginTransaction();
         $cols = COLONNES_FILM;
-        $ins = $pdo->prepare("INSERT INTO $vers ($cols, vu, date_ajout) SELECT $cols, $vu, datetime('now') FROM $depuis WHERE tmdb_id = ?");
-        $ins->execute([$tmdbId]);
+        $ins = $pdo->prepare("INSERT INTO $vers ($cols, vu, date_ajout) SELECT $cols, $vu, datetime('now') FROM $depuis WHERE tmdb_id = ? AND type = ?");
+        $ins->execute([$tmdbId, $type]);
         if ($ins->rowCount() === 0) {
             $pdo->rollBack();
-            repondre(false, 'Film introuvable', 404);
+            repondre(false, 'Titre introuvable', 404);
         }
-        $pdo->prepare("DELETE FROM $depuis WHERE tmdb_id = ?")->execute([$tmdbId]);
+        $pdo->prepare("DELETE FROM $depuis WHERE tmdb_id = ? AND type = ?")->execute([$tmdbId, $type]);
         $pdo->commit();
         repondre(true);
     } catch (Exception $e) {
