@@ -12,6 +12,11 @@ $stmt->execute([$id, $id]);
 $local = $stmt->fetch() ?: null;
 $statut = $local['statut'] ?? 'aucun';
 
+$stmt = $pdo->prepare("SELECT note, commentaire FROM avis WHERE tmdb_id = ?");
+$stmt->execute([$id]);
+$avis = $stmt->fetch() ?: [];
+$avis = ['note' => ($avis['note'] ?? null) ? (int)$avis['note'] : null, 'commentaire' => $avis['commentaire'] ?? ''];
+
 $url = "https://api.themoviedb.org/3/movie/$id?api_key=" . API_KEY
      . "&language=fr-FR&append_to_response=credits,images,videos&include_image_language=fr,en,null&include_video_language=fr,en";
 $json = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 6]]));
@@ -109,6 +114,9 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
             <?php if (isExtended($titre)): ?><span class="pill pill-vl">Version longue</span><?php endif; ?>
             <span class="pill pill-avoir" <?= si('a_voir', $statut) ?>><i class="fas fa-bookmark"></i> Dans ma liste</span>
             <span class="pill pill-vu" <?= si('vu', $statut) ?>><i class="fas fa-check"></i> Vu</span>
+            <button type="button" class="pill pill-perso" id="ouvrirAvis" <?= si('vu', $statut) ?> title="Mon avis">
+                <i class="fas fa-heart"></i> <span id="maNote"><?= $avis['note'] ? $avis['note'] . '/10' : 'Noter' ?></span>
+            </button>
         </div>
 
         <?php if ($genres): ?><p class="detail-genres"><?= e(implode(' · ', $genres)) ?></p><?php endif; ?>
@@ -171,6 +179,28 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
     </div>
 </dialog>
 
+<dialog class="sheet" id="avisDialog" aria-labelledby="avisTitre">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head">
+        <h2 id="avisTitre">Mon avis</h2>
+        <button type="button" class="icon-btn" aria-label="Fermer" onclick="avisDialog.close()"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="sheet-body">
+        <p class="sheet-label">Ma note sur 10</p>
+        <div class="chips chips-note" id="notes">
+            <?php for ($n = 1; $n <= 10; $n++): ?>
+                <button type="button" class="chip" data-note="<?= $n ?>" aria-label="<?= $n ?> sur 10"><?= $n ?></button>
+            <?php endfor; ?>
+        </div>
+        <label class="sheet-label" for="commentaire">Commentaire</label>
+        <textarea class="champ" id="commentaire" rows="5" maxlength="2000" placeholder="Ce que tu en as pensé…"></textarea>
+    </div>
+    <div class="sheet-foot">
+        <button type="button" class="btn btn-glass" onclick="avisDialog.close()">Annuler</button>
+        <button type="button" class="btn btn-primary" id="enregistrerAvis">Enregistrer</button>
+    </div>
+</dialog>
+
 <?php if ($trailer): ?>
     <dialog class="sheet sheet-video" id="videoDialog" aria-label="Bande-annonce">
         <div class="video"><iframe id="videoFrame" title="Bande-annonce" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe></div>
@@ -184,6 +214,53 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
     const SUIVANT = { addMovie: 'a_voir', marquerVu: 'vu', demarquerVu: 'a_voir', supprimerFilm: 'aucun' };
     const MESSAGES = { addMovie: 'Ajouté à ta liste', marquerVu: 'Marqué comme vu', demarquerVu: 'Remis dans « à voir »', supprimerFilm: 'Retiré de ta collection' };
 
+    const avisDialog = document.getElementById('avisDialog');
+    const notes = [...document.querySelectorAll('#notes .chip')];
+    const commentaire = document.getElementById('commentaire');
+    let avis = <?= json_encode($avis, JSON_HEX_TAG) ?>;
+    let noteChoisie = null;
+
+    async function poster(action, donnees = {}) {
+        const r = await fetch('../modele/' + action + '.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tmdb_id: TMDB_ID, ...donnees }),
+        });
+        const d = await r.json();
+        if (!d.success) throw new Error(d.message);
+    }
+
+    function choisirNote(n) {
+        noteChoisie = n;
+        notes.forEach(c => c.setAttribute('aria-pressed', +c.dataset.note === n));
+    }
+    function ouvrirAvis() {
+        choisirNote(avis.note);
+        commentaire.value = avis.commentaire || '';
+        avisDialog.showModal();
+    }
+    function majAvis(nouvel) {
+        avis = nouvel;
+        document.getElementById('maNote').textContent = avis.note ? avis.note + '/10' : 'Noter';
+    }
+    document.getElementById('ouvrirAvis').addEventListener('click', ouvrirAvis);
+    // Re-cliquer sur la note choisie la retire
+    notes.forEach(c => c.addEventListener('click', () => choisirNote(+c.dataset.note === noteChoisie ? null : +c.dataset.note)));
+    document.getElementById('enregistrerAvis').addEventListener('click', async e => {
+        const btn = e.currentTarget;
+        const nouvel = { note: noteChoisie, commentaire: commentaire.value.trim() };
+        btn.disabled = true;
+        try {
+            await poster('noterFilm', nouvel);
+            majAvis(nouvel);
+            avisDialog.close();
+            toast(nouvel.note || nouvel.commentaire ? 'Avis enregistré' : 'Avis effacé');
+        } catch (e) {
+            toast('Erreur : ' + e.message, true);
+        }
+        btn.disabled = false;
+    });
+
     function afficherStatut(statut) {
         detail.dataset.statut = statut;
         document.querySelectorAll('[data-si]').forEach(el => el.hidden = !el.dataset.si.split(' ').includes(statut));
@@ -194,18 +271,14 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
         if (btn.dataset.confirm && !confirm(btn.dataset.confirm)) return;
         btn.disabled = true;
         try {
-            const r = await fetch('../modele/' + action + '.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tmdb_id: TMDB_ID }),
-            });
-            const d = await r.json();
-            if (!d.success) throw new Error(d.message);
+            await poster(action);
+            if (action === 'supprimerFilm') majAvis({ note: null, commentaire: '' });
             const maj = () => afficherStatut(SUIVANT[action]);
             // La transition peut être annulée (onglet caché...) : la mise à jour se fait quand même
             document.startViewTransition ? document.startViewTransition(maj).ready.catch(() => {}) : maj();
             toast(MESSAGES[action]);
             store.set('watchd_modifie', 1);
+            if (action === 'marquerVu' && !avis.note) ouvrirAvis();
         } catch (e) {
             toast('Erreur : ' + e.message, true);
         }

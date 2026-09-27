@@ -1,5 +1,5 @@
 <?php
-// modele/api.php - Base commune des actions JSON : POST {"tmdb_id": 123}
+// modele/api.php - Base commune des actions JSON : POST {"tmdb_id": 123, ...}
 header('Content-Type: application/json');
 require_once __DIR__ . '/connexionBd.php';
 
@@ -11,7 +11,8 @@ function repondre($ok, $message = '', $code = 200) {
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') repondre(false, 'Méthode non autorisée', 405);
 
-$tmdbId = (int)(json_decode(file_get_contents('php://input'), true)['tmdb_id'] ?? 0);
+$body = json_decode(file_get_contents('php://input'), true) ?: [];
+$tmdbId = (int)($body['tmdb_id'] ?? 0);
 if ($tmdbId <= 0) repondre(false, 'ID invalide', 400);
 
 // Colonnes copiées quand un film change de table (tout sauf id, vu, date_ajout)

@@ -18,6 +18,14 @@ try {
     // Important pour SQLite : activer la gestion des clés étrangères
     $pdo->exec("PRAGMA foreign_keys = ON;");
 
+    // Avis perso, à part des films : ils survivent aux allers-retours « vu » / « à voir »
+    $pdo->exec("CREATE TABLE IF NOT EXISTS avis (
+        tmdb_id INTEGER PRIMARY KEY,
+        note INTEGER CHECK (note BETWEEN 1 AND 10),
+        commentaire TEXT,
+        date_maj DATETIME DEFAULT CURRENT_TIMESTAMP
+    )");
+
 } catch (PDOException $e) {
     // Si le dossier n'existe pas ou qu'il y a un problème de droit
     die("❌ Erreur de connexion SQLite : " . $e->getMessage() .
