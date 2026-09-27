@@ -52,6 +52,16 @@ try {
         $pdo->commit();
     }
 
+    // Migration v2 : saison = saison en cours d'une série (NULL = pas commencée).
+    // Une série « à voir » avec une saison est « en cours ».
+    if ($pdo->query("PRAGMA user_version")->fetchColumn() < 2) {
+        $pdo->beginTransaction();
+        $pdo->exec("ALTER TABLE films_a_voir ADD COLUMN saison INTEGER");
+        $pdo->exec("ALTER TABLE films_vus ADD COLUMN saison INTEGER");
+        $pdo->exec("PRAGMA user_version = 2");
+        $pdo->commit();
+    }
+
 } catch (PDOException $e) {
     // Si le dossier n'existe pas ou qu'il y a un problème de droit
     die("❌ Erreur de connexion SQLite : " . $e->getMessage() .

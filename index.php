@@ -5,7 +5,7 @@ require_once __DIR__ . '/pages/layout.php';
 
 $sql = "SELECT T.*, s.nom AS saga_nom, s.poster_path AS saga_poster, s.backdrop_path AS saga_backdrop
         FROM (
-            SELECT *, 'a_voir' AS statut FROM films_a_voir
+            SELECT *, CASE WHEN saison IS NULL THEN 'a_voir' ELSE 'en_cours' END AS statut FROM films_a_voir
             UNION ALL
             SELECT *, 'vu' AS statut FROM films_vus
         ) AS T
@@ -17,10 +17,11 @@ $allFilms = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 $affichage = [];
 $sagas = [];
 $genres = [];
-$nbVus = $nbSeries = 0;
+$nbVus = $nbEnCours = $nbSeries = 0;
 
 foreach ($allFilms as $f) {
     if ($f['statut'] === 'vu') $nbVus++;
+    if ($f['statut'] === 'en_cours') $nbEnCours++;
     if ($f['type'] === 'tv') $nbSeries++;
     foreach (array_filter(array_map('trim', explode(',', $f['genres'] ?? ''))) as $g) $genres[$g] = true;
 
@@ -54,19 +55,19 @@ unset($item);
 
 $genres = array_keys($genres);
 sort($genres);
-$nbAVoir = count($allFilms) - $nbVus;
+$nbAVoir = count($allFilms) - $nbVus - $nbEnCours;
 
 // Hero (PC) : jusqu'à 5 films, en priorité ceux qui restent à voir
 $avecImage = array_filter($allFilms, fn($f) => $f['backdrop_path'] && $f['synopsis']);
-$aVoirAvecImage = array_filter($avecImage, fn($f) => $f['statut'] === 'a_voir');
+$aVoirAvecImage = array_filter($avecImage, fn($f) => $f['statut'] !== 'vu');
 $heros = count($aVoirAvecImage) >= 3 ? $aVoirAvecImage : $avecImage;
 shuffle($heros);
 $heros = array_slice($heros, 0, 5);
 
 // Attributs utilisés par le filtre JS
-function attrsFiltre($titres, $genres, $duree, $aVoir, $vus, $type = 'movie') {
-    return sprintf('data-titre="%s" data-genres="%s" data-duree="%d" data-avoir="%d" data-vus="%d" data-type="%s"',
-        e(mb_strtolower(implode(' | ', $titres))), e(mb_strtolower($genres)), $duree, $aVoir, $vus, $type);
+function attrsFiltre($titres, $genres, $duree, $aVoir, $vus, $type = 'movie', $enCours = false) {
+    return sprintf('data-titre="%s" data-genres="%s" data-duree="%d" data-avoir="%d" data-vus="%d" data-encours="%d" data-type="%s"',
+        e(mb_strtolower(implode(' | ', $titres))), e(mb_strtolower($genres)), $duree, $aVoir, $vus, $enCours, $type);
 }
 
 // Film : durée ; série : nombre de saisons
@@ -76,17 +77,19 @@ function longueur($f) {
 
 function carteFilm($f) {
     $vu = $f['statut'] === 'vu';
+    $enCours = $f['statut'] === 'en_cours';
     $tv = $f['type'] === 'tv';
     $img = imageTmdb($f['poster_path']);
     $meta = array_filter([annee($f['date_sortie']), longueur($f)]);
     $note = noteFmt($f['note_tmdb']);
     ?>
     <a href="pages/detailFilm.php?id=<?= (int)$f['tmdb_id'] ?>&amp;type=<?= $f['type'] ?>" class="card<?= $vu ? ' is-vu' : '' ?><?= $tv ? ' is-serie' : '' ?>" data-vt
-       <?= attrsFiltre([$f['titre']], $f['genres'] ?? '', $f['duree'], !$vu, $vu, $f['type']) ?>>
+       <?= attrsFiltre([$f['titre']], $f['genres'] ?? '', $f['duree'], $f['statut'] === 'a_voir', $vu, $f['type'], $enCours) ?>>
         <div class="poster">
             <?php if ($img): imgAffiche($img); else: ?><span class="poster-empty"><?= e($f['titre']) ?></span><?php endif; ?>
             <?php if ($note): ?><span class="badge badge-note"><i class="fas fa-star"></i> <?= $note ?></span><?php endif; ?>
             <?php if ($vu): ?><span class="badge badge-vu" title="Vu"><i class="fas fa-check"></i></span><?php endif; ?>
+            <?php if ($enCours): ?><span class="badge badge-encours" title="Saison <?= (int)$f['saison'] ?> en cours"><i class="fas fa-play"></i> S<?= (int)$f['saison'] ?></span><?php endif; ?>
             <?php if (isExtended($f['titre'])): ?><span class="badge badge-vl" title="Version longue">VL</span><?php endif; ?>
             <?php if ($tv): ?><span class="badge badge-serie"><i class="fas fa-tv"></i> Série</span><?php endif; ?>
         </div>
@@ -107,7 +110,7 @@ enTete('', 'Watchd', 'collection', [
             <article class="hero-slide<?= $i === 0 ? ' is-active' : '' ?>" data-ambiance="<?= e(imageTmdb($h['backdrop_path'], 'w300')) ?>">
                 <div class="hero-bg" style="--img: url('<?= e(imageTmdb($h['backdrop_path'], 'w1280')) ?>')"></div>
                 <div class="hero-content">
-                    <p class="eyebrow"><?= $h['type'] === 'tv' ? 'Série · ' : '' ?><?= $h['statut'] === 'a_voir' ? 'À voir ce soir' : 'Déjà vu, à revoir' ?></p>
+                    <p class="eyebrow"><?= $h['type'] === 'tv' ? 'Série · ' : '' ?><?= ['a_voir' => 'À voir ce soir', 'en_cours' => 'Saison ' . (int)$h['saison'] . ' en cours', 'vu' => 'Déjà vu, à revoir'][$h['statut']] ?></p>
                     <h2 class="hero-title"><?= e($h['titre']) ?></h2>
                     <p class="hero-meta">
                         <?php if (noteFmt($h['note_tmdb'])): ?><span class="pill pill-note"><i class="fas fa-star"></i> <?= noteFmt($h['note_tmdb']) ?></span><?php endif; ?>
@@ -143,6 +146,7 @@ enTete('', 'Watchd', 'collection', [
         <h1 class="intro-title">On regarde quoi<br>ce soir ?</h1>
         <div class="intro-stats">
             <span class="stat"><i class="fas fa-bookmark"></i><b><?= $nbAVoir ?></b> à voir</span>
+            <?php if ($nbEnCours): ?><span class="stat"><i class="fas fa-play"></i><b><?= $nbEnCours ?></b> en cours</span><?php endif; ?>
             <span class="stat"><i class="fas fa-check"></i><b><?= $nbVus ?></b> vus</span>
             <?php if ($nbSeries): ?><span class="stat"><i class="fas fa-tv"></i><b><?= $nbSeries ?></b> série<?= $nbSeries > 1 ? 's' : '' ?></span><?php endif; ?>
             <?php if ($sagas): ?><span class="stat"><i class="fas fa-layer-group"></i><b><?= count($sagas) ?></b> sagas</span><?php endif; ?>
@@ -165,10 +169,11 @@ enTete('', 'Watchd', 'collection', [
                 <button type="button" data-v="movie">Films</button>
                 <button type="button" data-v="tv">Séries</button>
             </div>
-            <div class="segmented" data-f="statut" role="group" aria-label="Statut">
+            <div class="segmented segmented-4" data-f="statut" role="group" aria-label="Statut">
                 <span class="seg-indicator"></span>
                 <button type="button" data-v="tout">Tout</button>
                 <button type="button" data-v="avoir">À voir</button>
+                <button type="button" data-v="encours">En cours</button>
                 <button type="button" data-v="vus">Vus</button>
             </div>
         </div>
@@ -287,7 +292,7 @@ enTete('', 'Watchd', 'collection', [
                     && (!st.genre || d.genres.split(', ').includes(st.genre))
                     && (!st.duree || !duree || dureeOk[st.duree](duree))
                     && (st.type === 'tout' || d.type === st.type)
-                    && (st.statut === 'tout' || (st.statut === 'avoir' ? d.avoir : d.vus) === '1');
+                    && (st.statut === 'tout' || d[st.statut] === '1');
                 c.hidden = !ok;
                 if (ok) n++;
             });

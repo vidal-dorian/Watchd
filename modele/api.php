@@ -16,7 +16,8 @@ $tmdbId = (int)($body['tmdb_id'] ?? 0);
 if ($tmdbId <= 0) repondre(false, 'ID invalide', 400);
 $type = ($body['type'] ?? '') === 'tv' ? 'tv' : 'movie';
 
-// Colonnes copiées quand un titre change de table (tout sauf id, vu, date_ajout)
+// Colonnes copiées quand un titre change de table (tout sauf id, vu, date_ajout,
+// et saison : marquer vu ou remettre à voir remet la série à « pas commencée »)
 const COLONNES_FILM = 'type, saga_id, tmdb_id, titre, titre_original, genres, duree, saisons, note_tmdb, synopsis, tagline, date_sortie, poster_path, backdrop_path, chemin_fichier';
 
 // Déplace un titre d'une table à l'autre dans une transaction

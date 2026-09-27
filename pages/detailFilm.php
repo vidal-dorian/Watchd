@@ -8,7 +8,7 @@ if (!$id) { header('Location: ../index.php'); exit; }
 $type = ($_GET['type'] ?? '') === 'tv' ? 'tv' : 'movie';
 $tv = $type === 'tv';
 
-$stmt = $pdo->prepare("SELECT *, 'a_voir' AS statut FROM films_a_voir WHERE tmdb_id = ? AND type = ?
+$stmt = $pdo->prepare("SELECT *, CASE WHEN saison IS NULL THEN 'a_voir' ELSE 'en_cours' END AS statut FROM films_a_voir WHERE tmdb_id = ? AND type = ?
                        UNION ALL SELECT *, 'vu' AS statut FROM films_vus WHERE tmdb_id = ? AND type = ?");
 $stmt->execute([$id, $type, $id, $type]);
 $local = $stmt->fetch() ?: null;
@@ -55,7 +55,15 @@ $poster = imageTmdb($api['poster_path'] ?? $local['poster_path'] ?? null, 'w780'
 $backdrop = imageTmdb($api['backdrop_path'] ?? $local['backdrop_path'] ?? null, 'original');
 // Série : durée d'un épisode
 $duree = dureeFmt($api['runtime'] ?? $api['episode_run_time'][0] ?? $api['last_episode_to_air']['runtime'] ?? $local['duree'] ?? 0);
-$saisons = saisonsFmt($api['number_of_seasons'] ?? $local['saisons'] ?? 0);
+$nbSaisons = (int)($api['number_of_seasons'] ?? $local['saisons'] ?? 0);
+$saisons = saisonsFmt($nbSaisons);
+// Une nouvelle saison est sortie depuis l'ajout : on met la collection à jour
+if ($tv && $local && $nbSaisons !== (int)$local['saisons']) {
+    foreach (['films_a_voir', 'films_vus'] as $t) {
+        $pdo->prepare("UPDATE $t SET saisons = ? WHERE tmdb_id = ? AND type = 'tv'")->execute([$nbSaisons, $id]);
+    }
+}
+$saison = $local['saison'] ?? null;
 $dateSortie = $api['release_date'] ?? $api['first_air_date'] ?? $local['date_sortie'] ?? '';
 $note = noteFmt($api['vote_average'] ?? $local['note_tmdb'] ?? 0);
 $synopsis = ($api['overview'] ?? '') ?: ($local['synopsis'] ?? '') ?: 'Aucun résumé disponible.';
@@ -122,6 +130,7 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
             <?php elseif ($duree): ?><span><?= $duree ?></span><?php endif; ?>
             <?php if (isExtended($titre)): ?><span class="pill pill-vl">Version longue</span><?php endif; ?>
             <span class="pill pill-avoir" <?= si('a_voir', $statut) ?>><i class="fas fa-bookmark"></i> Dans ma liste</span>
+            <span class="pill pill-encours" <?= si('en_cours', $statut) ?>><i class="fas fa-play"></i> En cours</span>
             <span class="pill pill-vu" <?= si('vu', $statut) ?>><i class="fas fa-check"></i> Vu</span>
             <button type="button" class="pill pill-perso" id="ouvrirAvis" <?= si('vu', $statut) ?> title="Mon avis">
                 <i class="fas fa-heart"></i> <span id="maNote"><?= $avis['note'] ? $avis['note'] . '/10' : 'Noter' ?></span>
@@ -137,9 +146,19 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
             <button type="button" class="btn btn-primary" data-action="addMovie" <?= si('aucun', $statut) ?>>
                 <i class="fas fa-plus"></i> Ajouter à ma liste
             </button>
-            <button type="button" class="btn btn-primary" data-action="marquerVu" <?= si('a_voir', $statut) ?>>
-                <i class="fas fa-check"></i> Marquer comme vu
-            </button>
+            <?php if ($tv && $nbSaisons): ?>
+                <button type="button" class="btn btn-primary" id="ouvrirSaisons" <?= si('a_voir en_cours', $statut) ?>>
+                    <i class="fas fa-play"></i> <span id="saisonLabel"><?= $saison ? "Saison $saison / $nbSaisons" : 'Commencer' ?></span>
+                </button>
+                <button type="button" class="btn btn-glass btn-round has-label" data-action="marquerVu" <?= si('a_voir en_cours', $statut) ?>
+                        aria-label="Marquer comme vue" title="Marquer comme vue">
+                    <i class="fas fa-check"></i><span class="btn-label">Marquer comme vue</span>
+                </button>
+            <?php else: ?>
+                <button type="button" class="btn btn-primary" data-action="marquerVu" <?= si('a_voir en_cours', $statut) ?>>
+                    <i class="fas fa-check"></i> Marquer comme vu
+                </button>
+            <?php endif; ?>
             <button type="button" class="btn btn-glass" data-action="demarquerVu" <?= si('vu', $statut) ?>>
                 <i class="fas fa-rotate-left"></i> Remettre à voir
             </button>
@@ -148,7 +167,7 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
                     <i class="fas fa-play"></i><span class="btn-label">Bande-annonce</span>
                 </button>
             <?php endif; ?>
-            <button type="button" class="btn btn-glass btn-round btn-danger" data-action="supprimerFilm" <?= si('a_voir vu', $statut) ?>
+            <button type="button" class="btn btn-glass btn-round btn-danger" data-action="supprimerFilm" <?= si('a_voir en_cours vu', $statut) ?>
                     data-confirm="Retirer <?= $tv ? 'cette série' : 'ce film' ?> de ta collection ?" aria-label="Retirer de la collection" title="Retirer de la collection">
                 <i class="fas fa-trash"></i>
             </button>
@@ -211,6 +230,24 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
     </div>
 </dialog>
 
+<?php if ($tv && $nbSaisons): ?>
+    <dialog class="sheet" id="saisonsDialog" aria-labelledby="saisonsTitre">
+        <div class="sheet-grab"></div>
+        <div class="sheet-head">
+            <h2 id="saisonsTitre">Où j'en suis</h2>
+            <button type="button" class="icon-btn" aria-label="Fermer" onclick="saisonsDialog.close()"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="sheet-body">
+            <p class="sheet-label">Je regarde la saison…</p>
+            <div class="chips chips-note" id="saisons">
+                <?php for ($n = 1; $n <= $nbSaisons; $n++): ?>
+                    <button type="button" class="chip" data-saison="<?= $n ?>" aria-label="Saison <?= $n ?>"><?= $n ?></button>
+                <?php endfor; ?>
+            </div>
+        </div>
+    </dialog>
+<?php endif; ?>
+
 <?php if ($trailer): ?>
     <dialog class="sheet sheet-video" id="videoDialog" aria-label="Bande-annonce">
         <div class="video"><iframe id="videoFrame" title="Bande-annonce" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe></div>
@@ -222,7 +259,7 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
     const detail = document.getElementById('detail');
     const infosDialog = document.getElementById('infosDialog');
     const SUIVANT = { addMovie: 'a_voir', marquerVu: 'vu', demarquerVu: 'a_voir', supprimerFilm: 'aucun' };
-    const MESSAGES = { addMovie: 'Ajouté à ta liste', marquerVu: 'Marqué comme vu', demarquerVu: 'Remis dans « à voir »', supprimerFilm: 'Retiré de ta collection' };
+    const MESSAGES = { addMovie: 'Ajouté à ta liste', marquerVu: TYPE === 'tv' ? 'Marquée comme vue' : 'Marqué comme vu', demarquerVu: 'Remis dans « à voir »', supprimerFilm: 'Retiré de ta collection' };
 
     const avisDialog = document.getElementById('avisDialog');
     const notes = [...document.querySelectorAll('#notes .chip')];
@@ -271,6 +308,36 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
         btn.disabled = false;
     });
 
+    // Séries : saison en cours (les saisons d'avant sont vues)
+    const saisonsDialog = document.getElementById('saisonsDialog');
+    const chipsSaison = [...document.querySelectorAll('#saisons .chip')];
+    const labelSaison = document.getElementById('saisonLabel');
+    let saison = <?= json_encode($saison ? (int)$saison : null) ?>;
+    function majSaison(s) {
+        saison = s;
+        if (labelSaison) labelSaison.textContent = s ? `Saison ${s} / ${chipsSaison.length}` : 'Commencer';
+        chipsSaison.forEach(c => {
+            c.setAttribute('aria-pressed', +c.dataset.saison === s);
+            c.classList.toggle('is-done', +c.dataset.saison < s);
+        });
+    }
+    majSaison(saison);
+    document.getElementById('ouvrirSaisons')?.addEventListener('click', () => saisonsDialog.showModal());
+    // Re-cliquer sur la saison en cours la retire : la série redevient « à voir »
+    chipsSaison.forEach(c => c.addEventListener('click', async () => {
+        const s = +c.dataset.saison === saison ? null : +c.dataset.saison;
+        try {
+            await poster('saison', { saison: s });
+            majSaison(s);
+            afficherStatut(s ? 'en_cours' : 'a_voir');
+            saisonsDialog.close();
+            toast(s ? `Saison ${s} en cours` : 'Remise dans « à voir »');
+            store.set('watchd_modifie', 1);
+        } catch (e) {
+            toast('Erreur : ' + e.message, true);
+        }
+    }));
+
     function afficherStatut(statut) {
         detail.dataset.statut = statut;
         document.querySelectorAll('[data-si]').forEach(el => el.hidden = !el.dataset.si.split(' ').includes(statut));
@@ -283,6 +350,7 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
         try {
             await poster(action);
             if (action === 'supprimerFilm') majAvis({ note: null, commentaire: '' });
+            majSaison(null); // vu, remis à voir ou retiré : la série n'est plus « en cours »
             const maj = () => afficherStatut(SUIVANT[action]);
             // La transition peut être annulée (onglet caché...) : la mise à jour se fait quand même
             document.startViewTransition ? document.startViewTransition(maj).ready.catch(() => {}) : maj();
