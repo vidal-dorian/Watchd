@@ -17,10 +17,11 @@ $allFilms = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 $affichage = [];
 $sagas = [];
 $genres = [];
-$nbVus = 0;
+$nbVus = $nbSeries = 0;
 
 foreach ($allFilms as $f) {
     if ($f['statut'] === 'vu') $nbVus++;
+    if ($f['type'] === 'tv') $nbSeries++;
     foreach (array_filter(array_map('trim', explode(',', $f['genres'] ?? ''))) as $g) $genres[$g] = true;
 
     if (!empty($f['saga_id'])) {
@@ -63,24 +64,31 @@ shuffle($heros);
 $heros = array_slice($heros, 0, 5);
 
 // Attributs utilisés par le filtre JS
-function attrsFiltre($titres, $genres, $duree, $aVoir, $vus) {
-    return sprintf('data-titre="%s" data-genres="%s" data-duree="%d" data-avoir="%d" data-vus="%d"',
-        e(mb_strtolower(implode(' | ', $titres))), e(mb_strtolower($genres)), $duree, $aVoir, $vus);
+function attrsFiltre($titres, $genres, $duree, $aVoir, $vus, $type = 'movie') {
+    return sprintf('data-titre="%s" data-genres="%s" data-duree="%d" data-avoir="%d" data-vus="%d" data-type="%s"',
+        e(mb_strtolower(implode(' | ', $titres))), e(mb_strtolower($genres)), $duree, $aVoir, $vus, $type);
+}
+
+// Film : durée ; série : nombre de saisons
+function longueur($f) {
+    return $f['type'] === 'tv' ? saisonsFmt($f['saisons']) : dureeFmt($f['duree']);
 }
 
 function carteFilm($f) {
     $vu = $f['statut'] === 'vu';
+    $tv = $f['type'] === 'tv';
     $img = imageTmdb($f['poster_path']);
-    $meta = array_filter([annee($f['date_sortie']), dureeFmt($f['duree'])]);
+    $meta = array_filter([annee($f['date_sortie']), longueur($f)]);
     $note = noteFmt($f['note_tmdb']);
     ?>
-    <a href="pages/detailFilm.php?id=<?= (int)$f['tmdb_id'] ?>" class="card<?= $vu ? ' is-vu' : '' ?>" data-vt
-       <?= attrsFiltre([$f['titre']], $f['genres'] ?? '', $f['duree'], !$vu, $vu) ?>>
+    <a href="pages/detailFilm.php?id=<?= (int)$f['tmdb_id'] ?>&amp;type=<?= $f['type'] ?>" class="card<?= $vu ? ' is-vu' : '' ?><?= $tv ? ' is-serie' : '' ?>" data-vt
+       <?= attrsFiltre([$f['titre']], $f['genres'] ?? '', $f['duree'], !$vu, $vu, $f['type']) ?>>
         <div class="poster">
             <?php if ($img): imgAffiche($img); else: ?><span class="poster-empty"><?= e($f['titre']) ?></span><?php endif; ?>
             <?php if ($note): ?><span class="badge badge-note"><i class="fas fa-star"></i> <?= $note ?></span><?php endif; ?>
             <?php if ($vu): ?><span class="badge badge-vu" title="Vu"><i class="fas fa-check"></i></span><?php endif; ?>
             <?php if (isExtended($f['titre'])): ?><span class="badge badge-vl" title="Version longue">VL</span><?php endif; ?>
+            <?php if ($tv): ?><span class="badge badge-serie"><i class="fas fa-tv"></i> Série</span><?php endif; ?>
         </div>
         <div class="card-title"><?= e($f['titre']) ?></div>
         <div class="card-meta"><?= e(implode(' · ', $meta)) ?></div>
@@ -95,18 +103,18 @@ enTete('', 'Watchd', 'collection', [
 <?php if ($heros): ?>
     <section class="hero" aria-label="À l'affiche">
         <?php foreach ($heros as $i => $h): ?>
-            <?php $meta = array_filter([annee($h['date_sortie']), dureeFmt($h['duree']), str_replace(',', ' ·', $h['genres'] ?? '')]); ?>
+            <?php $meta = array_filter([annee($h['date_sortie']), longueur($h), str_replace(',', ' ·', $h['genres'] ?? '')]); ?>
             <article class="hero-slide<?= $i === 0 ? ' is-active' : '' ?>" data-ambiance="<?= e(imageTmdb($h['backdrop_path'], 'w300')) ?>">
                 <div class="hero-bg" style="--img: url('<?= e(imageTmdb($h['backdrop_path'], 'w1280')) ?>')"></div>
                 <div class="hero-content">
-                    <p class="eyebrow"><?= $h['statut'] === 'a_voir' ? 'À voir ce soir' : 'Déjà vu, à revoir' ?></p>
+                    <p class="eyebrow"><?= $h['type'] === 'tv' ? 'Série · ' : '' ?><?= $h['statut'] === 'a_voir' ? 'À voir ce soir' : 'Déjà vu, à revoir' ?></p>
                     <h2 class="hero-title"><?= e($h['titre']) ?></h2>
                     <p class="hero-meta">
                         <?php if (noteFmt($h['note_tmdb'])): ?><span class="pill pill-note"><i class="fas fa-star"></i> <?= noteFmt($h['note_tmdb']) ?></span><?php endif; ?>
                         <span><?= e(implode('  ·  ', $meta)) ?></span>
                     </p>
                     <p class="hero-desc"><?= e($h['synopsis']) ?></p>
-                    <a href="pages/detailFilm.php?id=<?= (int)$h['tmdb_id'] ?>" class="btn btn-primary">
+                    <a href="pages/detailFilm.php?id=<?= (int)$h['tmdb_id'] ?>&amp;type=<?= $h['type'] ?>" class="btn btn-primary">
                         <i class="fas fa-play"></i> Voir la fiche
                     </a>
                 </div>
@@ -126,8 +134,8 @@ enTete('', 'Watchd', 'collection', [
     <div class="empty">
         <i class="fas fa-film"></i>
         <strong>Ta collection est vide</strong>
-        Commence par ajouter les films que tu veux voir.<br>
-        <a href="pages/recherche.php" class="btn btn-primary"><i class="fas fa-plus"></i> Ajouter un film</a>
+        Commence par ajouter les films et séries que tu veux voir.<br>
+        <a href="pages/recherche.php" class="btn btn-primary"><i class="fas fa-plus"></i> Ajouter</a>
     </div>
 <?php else: ?>
     <section class="intro<?= $heros ? ' has-hero' : '' ?>">
@@ -136,6 +144,7 @@ enTete('', 'Watchd', 'collection', [
         <div class="intro-stats">
             <span class="stat"><i class="fas fa-bookmark"></i><b><?= $nbAVoir ?></b> à voir</span>
             <span class="stat"><i class="fas fa-check"></i><b><?= $nbVus ?></b> vus</span>
+            <?php if ($nbSeries): ?><span class="stat"><i class="fas fa-tv"></i><b><?= $nbSeries ?></b> série<?= $nbSeries > 1 ? 's' : '' ?></span><?php endif; ?>
             <?php if ($sagas): ?><span class="stat"><i class="fas fa-layer-group"></i><b><?= count($sagas) ?></b> sagas</span><?php endif; ?>
         </div>
     </section>
@@ -143,17 +152,25 @@ enTete('', 'Watchd', 'collection', [
     <div class="toolbar">
         <label class="search">
             <i class="fas fa-magnifying-glass"></i>
-            <input type="search" id="q" placeholder="Film, saga, genre…" autocomplete="off" enterkeyhint="search" aria-label="Rechercher dans ma collection">
+            <input type="search" id="q" placeholder="Film, série, saga, genre…" autocomplete="off" enterkeyhint="search" aria-label="Rechercher dans ma collection">
         </label>
         <button type="button" class="filter-btn" id="ouvrirFiltres" aria-label="Filtres">
             <i class="fas fa-sliders"></i>
             <span class="filter-badge" id="nbFiltres" hidden></span>
         </button>
-        <div class="segmented" id="statut" role="group" aria-label="Statut">
-            <span class="seg-indicator"></span>
-            <button type="button" data-statut="tout">Tout</button>
-            <button type="button" data-statut="avoir">À voir</button>
-            <button type="button" data-statut="vus">Vus</button>
+        <div class="segments">
+            <div class="segmented" data-f="type" role="group" aria-label="Type">
+                <span class="seg-indicator"></span>
+                <button type="button" data-v="tout">Tout</button>
+                <button type="button" data-v="movie">Films</button>
+                <button type="button" data-v="tv">Séries</button>
+            </div>
+            <div class="segmented" data-f="statut" role="group" aria-label="Statut">
+                <span class="seg-indicator"></span>
+                <button type="button" data-v="tout">Tout</button>
+                <button type="button" data-v="avoir">À voir</button>
+                <button type="button" data-v="vus">Vus</button>
+            </div>
         </div>
     </div>
 
@@ -191,7 +208,7 @@ enTete('', 'Watchd', 'collection', [
     <div class="empty" id="vide" hidden>
         <i class="fas fa-ghost"></i>
         <strong>Rien par ici</strong>
-        Aucun film ne correspond à ces filtres.<br>
+        Aucun titre ne correspond à ces filtres.<br>
         <button type="button" class="btn btn-glass" id="toutEffacer">Effacer les filtres</button>
     </div>
 
@@ -245,19 +262,21 @@ enTete('', 'Watchd', 'collection', [
     </dialog>
 
     <script>
-        const STATUTS = ['tout', 'avoir', 'vus'];
-        const st = Object.assign({ q: '', statut: 'tout', duree: '', genre: '' }, store.get('watchd_filtres_v2'));
+        const st = Object.assign({ q: '', statut: 'tout', type: 'tout', duree: '', genre: '' }, store.get('watchd_filtres_v2'));
         const cartes = [...document.querySelectorAll('#grille > .card')];
         const chips = [...document.querySelectorAll('#filtresDialog .chip')];
-        const segment = document.getElementById('statut');
+        const segments = [...document.querySelectorAll('.segmented')];
         const inputQ = document.getElementById('q');
         const sagaDialog = document.getElementById('sagaDialog');
         const filtresDialog = document.getElementById('filtresDialog');
         const dureeOk = { court: d => d <= 90, standard: d => d <= 120, long: d => d > 120 };
 
         function appliquer() {
-            segment.style.setProperty('--i', STATUTS.indexOf(st.statut));
-            segment.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.statut === st.statut));
+            segments.forEach(s => {
+                const boutons = [...s.querySelectorAll('button')];
+                s.style.setProperty('--i', boutons.findIndex(b => b.dataset.v === st[s.dataset.f]));
+                boutons.forEach(b => b.setAttribute('aria-pressed', b.dataset.v === st[s.dataset.f]));
+            });
             chips.forEach(b => b.setAttribute('aria-pressed', st[b.dataset.f] === b.dataset.v));
 
             const q = st.q.trim().toLowerCase();
@@ -267,6 +286,7 @@ enTete('', 'Watchd', 'collection', [
                 const ok = (!q || d.titre.includes(q) || d.genres.includes(q))
                     && (!st.genre || d.genres.split(', ').includes(st.genre))
                     && (!st.duree || !duree || dureeOk[st.duree](duree))
+                    && (st.type === 'tout' || d.type === st.type)
                     && (st.statut === 'tout' || (st.statut === 'avoir' ? d.avoir : d.vus) === '1');
                 c.hidden = !ok;
                 if (ok) n++;
@@ -285,10 +305,10 @@ enTete('', 'Watchd', 'collection', [
             store.set('watchd_filtres_v2', st);
         }
 
-        segment.addEventListener('click', e => {
+        segments.forEach(s => s.addEventListener('click', e => {
             const b = e.target.closest('button');
-            if (b) { st.statut = b.dataset.statut; appliquer(); }
-        });
+            if (b) { st[s.dataset.f] = b.dataset.v; appliquer(); }
+        }));
         filtresDialog.addEventListener('click', e => {
             if (e.target === filtresDialog) return filtresDialog.close();
             const b = e.target.closest('.chip');
@@ -297,7 +317,7 @@ enTete('', 'Watchd', 'collection', [
         document.getElementById('ouvrirFiltres').addEventListener('click', () => filtresDialog.showModal());
         document.getElementById('reinitFiltres').addEventListener('click', () => { st.duree = st.genre = ''; appliquer(); });
         document.getElementById('toutEffacer').addEventListener('click', () => {
-            Object.assign(st, { q: '', statut: 'tout', duree: '', genre: '' });
+            Object.assign(st, { q: '', statut: 'tout', type: 'tout', duree: '', genre: '' });
             inputQ.value = '';
             appliquer();
         });

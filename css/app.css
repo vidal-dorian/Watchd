@@ -16,6 +16,7 @@
     --gold: #f5c518;
     --green: #30d158;
     --purple: #bf5af2;
+    --cyan: #40c8e0;
     --radius: 14px;
     --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
     --topbar-h: 64px;
@@ -203,6 +204,8 @@ img { display: block; max-width: 100%; }
     transition: transform 0.45s var(--ease);
 }
 
+.segments { display: flex; gap: 8px; width: 100%; }
+
 .count { color: var(--muted); font-size: 0.8rem; padding: 6px var(--gutter) 0; }
 
 .empty { text-align: center; color: var(--muted); padding: 72px 24px; }
@@ -260,6 +263,9 @@ img { display: block; max-width: 100%; }
 .badge-vu { top: 8px; right: 8px; width: 22px; padding: 0; justify-content: center; background: var(--green); color: #031a09; box-shadow: 0 4px 12px rgba(48, 209, 88, 0.45); }
 .badge-vl { top: 8px; left: 8px; background: rgba(191, 90, 242, 0.85); }
 .badge-saga { bottom: 8px; left: 8px; }
+/* Séries : ruban et liseré cyan, reconnaissables d'un coup d'œil dans la grille */
+.badge-serie { top: 8px; left: 8px; background: var(--cyan); color: #04212a; box-shadow: 0 4px 12px rgba(64, 200, 224, 0.45); }
+.card.is-serie .poster::after { box-shadow: inset 0 0 0 2px var(--cyan); }
 .badge-note { bottom: 8px; left: 8px; opacity: 0; transform: translateY(6px); transition: opacity 0.3s, transform 0.3s var(--ease); }
 .badge-note i { color: var(--gold); }
 
@@ -414,6 +420,7 @@ label.sheet-label { display: block; }
 .pill-vl { background: rgba(191, 90, 242, 0.28); color: #e7c2ff; }
 .pill-avoir { background: rgba(229, 9, 20, 0.25); color: #ff9aa1; }
 .pill-vu { background: rgba(48, 209, 88, 0.22); color: #7ceaa3; }
+.pill-serie { background: rgba(64, 200, 224, 0.22); color: #9eeaf7; }
 .pill-perso { background: rgba(245, 197, 24, 0.2); color: #ffe27a; cursor: pointer; transition: background 0.2s; }
 .pill-perso:hover { background: rgba(245, 197, 24, 0.32); }
 .detail-genres { color: rgba(255, 255, 255, 0.6); font-size: 0.85rem; margin-top: -4px; }
@@ -519,6 +526,8 @@ label.sheet-label { display: block; }
     .toolbar.is-stuck { padding-top: 12px; }
     .search { flex: 0 1 520px; }
     .segmented { width: 330px; margin-left: auto; }
+    .segments { width: auto; margin-left: auto; }
+    .segments .segmented { width: 250px; }
 
     .grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 34px 22px; padding: 16px var(--gutter) 56px; }
 

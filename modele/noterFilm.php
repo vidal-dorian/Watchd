@@ -9,10 +9,10 @@ $commentaire = mb_substr(trim((string)($body['commentaire'] ?? '')), 0, 2000);
 try {
     // Ni note ni commentaire : on efface l'avis
     if ($note === null && $commentaire === '') {
-        $pdo->prepare("DELETE FROM avis WHERE tmdb_id = ?")->execute([$tmdbId]);
+        $pdo->prepare("DELETE FROM avis WHERE tmdb_id = ? AND type = ?")->execute([$tmdbId, $type]);
     } else {
-        $pdo->prepare("INSERT OR REPLACE INTO avis (tmdb_id, note, commentaire) VALUES (?, ?, ?)")
-            ->execute([$tmdbId, $note, $commentaire ?: null]);
+        $pdo->prepare("INSERT OR REPLACE INTO avis (type, tmdb_id, note, commentaire) VALUES (?, ?, ?, ?)")
+            ->execute([$type, $tmdbId, $note, $commentaire ?: null]);
     }
     repondre(true);
 } catch (Exception $e) {

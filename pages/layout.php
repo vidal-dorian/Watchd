@@ -8,6 +8,11 @@ function dureeFmt($min) {
     return $min > 0 ? intdiv($min, 60) . 'h' . sprintf('%02d', $min % 60) : '';
 }
 
+function saisonsFmt($n) {
+    $n = (int)$n;
+    return $n > 0 ? $n . ' saison' . ($n > 1 ? 's' : '') : '';
+}
+
 function noteFmt($note) { return $note ? number_format((float)$note, 1, ',', '') : ''; }
 
 function annee($date) { return substr($date ?? '', 0, 4); }

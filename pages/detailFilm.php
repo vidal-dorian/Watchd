@@ -1,23 +1,25 @@
 <?php
-// pages/detailFilm.php - Fiche d'un film (un seul écran, sans scroll vertical)
+// pages/detailFilm.php - Fiche d'un film ou d'une série (?type=tv) (un seul écran, sans scroll vertical)
 require_once __DIR__ . '/../modele/connexionBd.php';
 require_once __DIR__ . '/layout.php';
 
 $id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 if (!$id) { header('Location: ../index.php'); exit; }
+$type = ($_GET['type'] ?? '') === 'tv' ? 'tv' : 'movie';
+$tv = $type === 'tv';
 
-$stmt = $pdo->prepare("SELECT *, 'a_voir' AS statut FROM films_a_voir WHERE tmdb_id = ?
-                       UNION ALL SELECT *, 'vu' AS statut FROM films_vus WHERE tmdb_id = ?");
-$stmt->execute([$id, $id]);
+$stmt = $pdo->prepare("SELECT *, 'a_voir' AS statut FROM films_a_voir WHERE tmdb_id = ? AND type = ?
+                       UNION ALL SELECT *, 'vu' AS statut FROM films_vus WHERE tmdb_id = ? AND type = ?");
+$stmt->execute([$id, $type, $id, $type]);
 $local = $stmt->fetch() ?: null;
 $statut = $local['statut'] ?? 'aucun';
 
-$stmt = $pdo->prepare("SELECT note, commentaire FROM avis WHERE tmdb_id = ?");
-$stmt->execute([$id]);
+$stmt = $pdo->prepare("SELECT note, commentaire FROM avis WHERE tmdb_id = ? AND type = ?");
+$stmt->execute([$id, $type]);
 $avis = $stmt->fetch() ?: [];
 $avis = ['note' => ($avis['note'] ?? null) ? (int)$avis['note'] : null, 'commentaire' => $avis['commentaire'] ?? ''];
 
-$url = "https://api.themoviedb.org/3/movie/$id?api_key=" . API_KEY
+$url = "https://api.themoviedb.org/3/$type/$id?api_key=" . API_KEY
      . "&language=fr-FR&append_to_response=credits,images,videos&include_image_language=fr,en,null&include_video_language=fr,en";
 $json = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 6]]));
 $api = $json ? json_decode($json, true) : [];
@@ -25,14 +27,14 @@ if (isset($api['status_code'])) $api = [];
 
 if (!$api && !$local) {
     http_response_code(404);
-    enTete('../', 'Film introuvable', null);
-    echo '<div class="empty"><i class="fas fa-film"></i><strong>Film introuvable</strong><a href="../index.php" class="btn btn-glass">Retour à la collection</a></div>';
+    enTete('../', 'Introuvable', null);
+    echo '<div class="empty"><i class="fas fa-film"></i><strong>Introuvable</strong><a href="../index.php" class="btn btn-glass">Retour à la collection</a></div>';
     piedDePage('../', null);
     exit;
 }
 
 // Le titre local peut contenir « (Version Longue) », on le préfère
-$titre = $local['titre'] ?? $api['title'] ?? 'Titre inconnu';
+$titre = $local['titre'] ?? $api['title'] ?? $api['name'] ?? 'Titre inconnu';
 
 // Logo : français en priorité, puis anglais, puis le premier
 $logo = null;
@@ -51,8 +53,10 @@ foreach ($api['videos']['results'] ?? [] as $v) {
 
 $poster = imageTmdb($api['poster_path'] ?? $local['poster_path'] ?? null, 'w780');
 $backdrop = imageTmdb($api['backdrop_path'] ?? $local['backdrop_path'] ?? null, 'original');
-$duree = dureeFmt($api['runtime'] ?? $local['duree'] ?? 0);
-$dateSortie = $api['release_date'] ?? $local['date_sortie'] ?? '';
+// Série : durée d'un épisode
+$duree = dureeFmt($api['runtime'] ?? $api['episode_run_time'][0] ?? $api['last_episode_to_air']['runtime'] ?? $local['duree'] ?? 0);
+$saisons = saisonsFmt($api['number_of_seasons'] ?? $local['saisons'] ?? 0);
+$dateSortie = $api['release_date'] ?? $api['first_air_date'] ?? $local['date_sortie'] ?? '';
 $note = noteFmt($api['vote_average'] ?? $local['note_tmdb'] ?? 0);
 $synopsis = ($api['overview'] ?? '') ?: ($local['synopsis'] ?? '') ?: 'Aucun résumé disponible.';
 $tagline = ($api['tagline'] ?? '') ?: ($local['tagline'] ?? '');
@@ -60,8 +64,10 @@ $genres = isset($api['genres'])
     ? array_column($api['genres'], 'name')
     : array_filter(array_map('trim', explode(',', $local['genres'] ?? '')));
 $cast = array_slice($api['credits']['cast'] ?? [], 0, 15);
-$realisateurs = array_column(array_filter($api['credits']['crew'] ?? [], fn($c) => $c['job'] === 'Director'), 'name');
-$titreOriginal = $api['original_title'] ?? $local['titre_original'] ?? '';
+$realisateurs = $tv
+    ? array_column($api['created_by'] ?? [], 'name')
+    : array_column(array_filter($api['credits']['crew'] ?? [], fn($c) => $c['job'] === 'Director'), 'name');
+$titreOriginal = $api['original_title'] ?? $api['original_name'] ?? $local['titre_original'] ?? '';
 
 $mois = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 $ts = $dateSortie ? strtotime($dateSortie) : false;
@@ -110,7 +116,10 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
         <div class="detail-meta">
             <?php if ($note): ?><span class="pill pill-note"><i class="fas fa-star"></i> <?= $note ?></span><?php endif; ?>
             <?php if ($ts): ?><span><?= date('Y', $ts) ?></span><?php endif; ?>
-            <?php if ($duree): ?><span><?= $duree ?></span><?php endif; ?>
+            <?php if ($tv): ?>
+                <span class="pill pill-serie"><i class="fas fa-tv"></i> Série</span>
+                <?php if ($saisons): ?><span><?= $saisons ?></span><?php endif; ?>
+            <?php elseif ($duree): ?><span><?= $duree ?></span><?php endif; ?>
             <?php if (isExtended($titre)): ?><span class="pill pill-vl">Version longue</span><?php endif; ?>
             <span class="pill pill-avoir" <?= si('a_voir', $statut) ?>><i class="fas fa-bookmark"></i> Dans ma liste</span>
             <span class="pill pill-vu" <?= si('vu', $statut) ?>><i class="fas fa-check"></i> Vu</span>
@@ -140,7 +149,7 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
                 </button>
             <?php endif; ?>
             <button type="button" class="btn btn-glass btn-round btn-danger" data-action="supprimerFilm" <?= si('a_voir vu', $statut) ?>
-                    data-confirm="Retirer ce film de ta collection ?" aria-label="Retirer de la collection" title="Retirer de la collection">
+                    data-confirm="Retirer <?= $tv ? 'cette série' : 'ce film' ?> de ta collection ?" aria-label="Retirer de la collection" title="Retirer de la collection">
                 <i class="fas fa-trash"></i>
             </button>
         </div>
@@ -163,10 +172,11 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
         <?php if ($tagline): ?><p class="infos-tagline">« <?= e($tagline) ?> »</p><?php endif; ?>
         <p class="infos-synopsis"><?= e($synopsis) ?></p>
         <dl class="facts">
-            <?php if ($realisateurs): ?><dt>Réalisation</dt><dd><?= e(implode(', ', $realisateurs)) ?></dd><?php endif; ?>
+            <?php if ($realisateurs): ?><dt><?= $tv ? 'Création' : 'Réalisation' ?></dt><dd><?= e(implode(', ', $realisateurs)) ?></dd><?php endif; ?>
             <?php if ($titreOriginal && $titreOriginal !== $titre): ?><dt>Titre original</dt><dd><?= e($titreOriginal) ?></dd><?php endif; ?>
-            <?php if ($sortieLongue): ?><dt>Sortie</dt><dd><?= $sortieLongue ?></dd><?php endif; ?>
-            <?php if ($duree): ?><dt>Durée</dt><dd><?= $duree ?></dd><?php endif; ?>
+            <?php if ($sortieLongue): ?><dt><?= $tv ? 'Première diffusion' : 'Sortie' ?></dt><dd><?= $sortieLongue ?></dd><?php endif; ?>
+            <?php if ($saisons): ?><dt>Saisons</dt><dd><?= $saisons ?></dd><?php endif; ?>
+            <?php if ($duree): ?><dt><?= $tv ? "Durée d'un épisode" : 'Durée' ?></dt><dd><?= $duree ?></dd><?php endif; ?>
             <?php if ($genres): ?><dt>Genres</dt><dd><?= e(implode(', ', $genres)) ?></dd><?php endif; ?>
             <?php if ($note): ?><dt>Note TMDB</dt><dd><?= $note ?> / 10</dd><?php endif; ?>
         </dl>
@@ -208,7 +218,7 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
 <?php endif; ?>
 
 <script>
-    const TMDB_ID = <?= $id ?>;
+    const TMDB_ID = <?= $id ?>, TYPE = '<?= $type ?>';
     const detail = document.getElementById('detail');
     const infosDialog = document.getElementById('infosDialog');
     const SUIVANT = { addMovie: 'a_voir', marquerVu: 'vu', demarquerVu: 'a_voir', supprimerFilm: 'aucun' };
@@ -224,7 +234,7 @@ enTete('../', $titre . ' - Watchd', null, ['barre' => false, 'classe' => 'page-d
         const r = await fetch('../modele/' + action + '.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tmdb_id: TMDB_ID, ...donnees }),
+            body: JSON.stringify({ tmdb_id: TMDB_ID, type: TYPE, ...donnees }),
         });
         const d = await r.json();
         if (!d.success) throw new Error(d.message);
